@@ -16,10 +16,10 @@
     }
     
     let value = "";
+    let id = generateRandomString(12);
 
     if (browser) {
         let lastValue = "";
-        let id = generateRandomString(12);
 
         const urlParams = new URLSearchParams(window.location.search);
         const host = urlParams.get('host') ?? "127.0.0.1";
@@ -29,7 +29,7 @@
                 return;
             }
             lastValue = value;
-            fetch(`http://${host}/code/${id}`, {
+            fetch(`${host}/code/${id}`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "text/plain",
@@ -48,6 +48,9 @@
 
 </script>
 
+<label for=name>Name:</label>
+<input id=name bind:value={id}>
+<hr>
 <CodeMirror bind:value basic={false} extensions={[keymap.of([
     ...defaultKeymap,
   ])

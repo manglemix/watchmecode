@@ -1,7 +1,7 @@
 use axum::{extract::Path, routing::post, Router};
 use tokio::fs::{create_dir_all, read_dir, remove_file, write};
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::{compression::CompressionLayer, cors::{Any, CorsLayer}};
 
 #[axum::debug_handler]
 async fn post_code(Path((id,)): Path<(String,)>, code: String) {
@@ -26,6 +26,10 @@ async fn main() {
                 .allow_methods(Any)
                 .allow_private_network(true)
                 .allow_headers(Any),
+        )
+        .layer(
+            CompressionLayer::new()
+                .br(true)
         ),
     );
 
