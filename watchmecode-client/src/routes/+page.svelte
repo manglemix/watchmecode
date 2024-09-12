@@ -34,7 +34,8 @@
                 headers: {
                     "Content-Type": "text/plain",
                 },
-                body: value
+                body: value,
+                mode: "no-cors",
             });
         }
 
