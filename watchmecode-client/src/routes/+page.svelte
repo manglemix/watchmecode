@@ -23,7 +23,6 @@
 
         const urlParams = new URLSearchParams(window.location.search);
         const host = urlParams.get('host') ?? "127.0.0.1";
-        console.log(host);
 
         async function postCode() {
             if (lastValue == value) {
