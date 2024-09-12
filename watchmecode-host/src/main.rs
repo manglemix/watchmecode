@@ -1,4 +1,4 @@
-use axum::{extract::Path, routing::post, Router};
+use axum::{extract::Path, http::Method, routing::post, Router};
 use tokio::fs::{create_dir_all, read_dir, remove_file, write};
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::{Any, CorsLayer}};
@@ -23,9 +23,7 @@ async fn main() {
         ServiceBuilder::new().layer(
             CorsLayer::new()
                 .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_private_network(true)
-                .allow_headers(Any),
+                .allow_methods([Method::POST]),
         )
         .layer(
             CompressionLayer::new()
