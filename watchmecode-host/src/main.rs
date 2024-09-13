@@ -16,6 +16,21 @@ use tokio::{
     io::{AsyncSeekExt, AsyncWriteExt, BufWriter}, sync::Notify,
 };
 use tower_http::{compression::CompressionLayer, cors::{Any, CorsLayer}};
+use clap::{Parser, Subcommand};
+use ngrok::{config::TunnelBuilder, prelude::TunnelExt};
+use ngrok::tunnel::UrlTunnel;
+
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Ngrok,
+}
 
 static HOST_CODE: RwLock<String> = RwLock::new(String::new());
 static HOST_CODE_CHANGED: Notify = Notify::const_new();
@@ -91,6 +106,7 @@ async fn code_ws(ws: WebSocketUpgrade) -> Response {
 
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
     create_dir_all("incoming").await.unwrap();
     let mut read_dir_iter = read_dir("incoming").await.unwrap();
 
@@ -130,7 +146,34 @@ async fn main() {
                         .allow_methods(Any)
                 )
         );
-
+    
+    match cli.command {
+        Some(Commands::Ngrok) => {
+            let mut tun = ngrok::Session::builder()
+                // Read the token from the NGROK_AUTHTOKEN environment variable
+                .authtoken_from_env()
+                // Connect the ngrok session
+                .connect()
+                .await
+                .expect("Failed to init ngrok")
+                // Start a tunnel with an HTTP edge
+                .http_endpoint()
+                .compression()
+                .listen()
+                .await
+                .expect("Failed to start tunnel");
+        
+            println!("Deployed on: https://manglemix.github.io/watchmecode/?host=wss://{}", &tun.url()[8..]);
+            tokio::spawn(async move {
+                tun.forward_tcp("127.0.0.1:80").await.expect("Failed to forward TCP");
+            });
+        }
+        None => {
+            println!("Deployed on: https://manglemix.github.io/watchmecode/?host=<insert host address here>");
+            println!("Port 80 must be deployed manually");
+        }
+    }
+    
     let listener = tokio::net::TcpListener::bind("0.0.0.0:80").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

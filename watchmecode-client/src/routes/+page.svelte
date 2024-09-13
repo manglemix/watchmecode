@@ -77,6 +77,10 @@
     }
 </script>
 
+<svelte:head>
+    <title>WatchMeCode</title>
+</svelte:head>
+
 <label for=name>Name:</label>
 <input id=name bind:value={username} on:change={onNameChanged}>
 <hr>
