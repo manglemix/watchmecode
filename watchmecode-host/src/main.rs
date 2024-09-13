@@ -7,27 +7,14 @@ use chrono::{Local, Timelike};
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{
-    extract::Path,
-    http::{HeaderValue, Method},
-    routing::post,
-    Router,
-};
-use axum_extra::extract::{cookie::Cookie, CookieJar};
+use axum::{extract::Path, routing::post, Router};
 use fxhash::{FxBuildHasher, FxHashMap};
-use rand::{
-    distributions::{Alphanumeric, DistString},
-    thread_rng,
-};
+
 use tokio::{
     fs::{create_dir_all, read_dir, remove_file},
     io::{AsyncWriteExt, BufWriter},
 };
-use tower::ServiceBuilder;
-use tower_http::{
-    compression::CompressionLayer,
-    cors::{AllowOrigin, CorsLayer},
-};
+use tower_http::compression::CompressionLayer;
 
 struct UserInfo {
     name: Arc<str>,
@@ -36,21 +23,11 @@ struct UserInfo {
 static USERS: RwLock<FxHashMap<String, UserInfo>> =
     RwLock::new(HashMap::with_hasher(FxBuildHasher::new()));
 
-async fn post_code(name: Option<String>, mut jar: CookieJar, code: String) -> CookieJar {
-    let id_owned;
-    let id = match jar.get("Code-Id") {
-        Some(cookie) => cookie.value(),
-        None => {
-            id_owned = Alphanumeric.sample_string(&mut thread_rng(), 16);
-            jar = jar.add(Cookie::new("Code-Id", id_owned.clone()));
-            &id_owned
-        }
-    };
-
+async fn post_code(id: String, name: Option<String>, code: String) {
     let owned_name: Arc<str>;
     let name = if let Some(name) = name {
         'result: {
-            if let Some(info) = USERS.read().get(id) {
+            if let Some(info) = USERS.read().get(&id) {
                 if &*info.name == &name {
                     owned_name = info.name.clone();
                     break 'result &*owned_name;
@@ -67,7 +44,7 @@ async fn post_code(name: Option<String>, mut jar: CookieJar, code: String) -> Co
             &*owned_name
         }
     } else {
-        if let Some(info) = USERS.read().get(id) {
+        if let Some(info) = USERS.read().get(&id) {
             owned_name = info.name.clone();
             &*owned_name
         } else {
@@ -100,22 +77,16 @@ async fn post_code(name: Option<String>, mut jar: CookieJar, code: String) -> Co
     };
     result.expect("Failed to write to file");
     file.flush().await.expect("Failed to flush");
-
-    jar
 }
 
 #[axum::debug_handler]
-async fn post_code_with_name(
-    Path((name,)): Path<(String,)>,
-    jar: CookieJar,
-    code: String,
-) -> CookieJar {
-    post_code(Some(name), jar, code).await
+async fn post_code_with_name(Path((id, name)): Path<(String, String)>, code: String) {
+    post_code(id, Some(name), code).await
 }
 
 #[axum::debug_handler]
-async fn post_code_without_name(jar: CookieJar, code: String) -> CookieJar {
-    post_code(None, jar, code).await
+async fn post_code_without_name(Path((id,)): Path<(String,)>, code: String) {
+    post_code(id, None, code).await
 }
 
 #[tokio::main]
@@ -128,24 +99,9 @@ async fn main() {
     }
 
     let app = Router::new()
-        .route("/code/:name/", post(post_code_with_name))
-        .route("/code/", post(post_code_without_name))
-        .layer(
-            ServiceBuilder::new()
-                // .layer(
-                //     CorsLayer::new()
-                //         .allow_origin(AllowOrigin::list([
-                //             "https://manglemix.github.com"
-                //                 .parse::<HeaderValue>()
-                //                 .unwrap(),
-                //             "http://localhost:5173".parse::<HeaderValue>().unwrap(),
-                //             "http://127.0.0.1:5173".parse::<HeaderValue>().unwrap(),
-                //         ]))
-                //         .allow_methods([Method::POST])
-                //         .allow_credentials(true),
-                // )
-                .layer(CompressionLayer::new().br(true)),
-        );
+        .route("/code/:id/:name/", post(post_code_with_name))
+        .route("/code/:id/", post(post_code_without_name))
+        .layer(CompressionLayer::new().br(true));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:80").await.unwrap();
     axum::serve(listener, app).await.unwrap();
