@@ -5,44 +5,58 @@
 	import { onDestroy } from "svelte";
 	import { browser } from "$app/environment";
 
-    function generateRandomString(length: number): string {
-        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let result = '';
-        const charactersLength = characters.length;
-        for (let i = 0; i < length; i++) {
-            result += characters.charAt(Math.floor(Math.random() * charactersLength));
-        }
-        return result;
+    async function delay(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
-    
+
     let value = "";
-    let name = "";
     let lastValue = "";
+    let username = "";
+    let oldUsername = "";
+    let host_code = "";
+    let showing_host_code = false;
+    let websocket: WebSocket | null = null;
 
     if (browser) {
-        let id = generateRandomString(16);
         const urlParams = new URLSearchParams(window.location.search);
-        const host = urlParams.get('host') ?? "http://127.0.0.1";
+        let host = urlParams.get('host') ?? "ws://127.0.0.1";
+        if (host.endsWith("/")) {
+            host = host.slice(0, -1);
+        }
+        function openWebSocket() {
+            websocket = new WebSocket(`${host}/code/`);
+            websocket.onmessage = (event) => {
+                host_code = event.data;
+            };
+            websocket.onclose = (_) => {
+                if (websocket === null) {
+                    return;
+                }
+                websocket = null;
+                delay(1000).then(openWebSocket);
+            };
+            websocket.onerror = (_) => {
+                if (websocket === null) {
+                    return;
+                }
+                websocket = null;
+                delay(1000).then(openWebSocket);
+            };
+            websocket.onopen = () => {
+                onNameChanged();
+                if (value != "") {
+                    websocket!.send(`CODE: ${value}`);
+                }
+            };
+        }
+        openWebSocket();
 
         async function postCode() {
             if (lastValue == value) {
                 return;
             }
             lastValue = value;
-            let url;
-            if (name.length > 0) {
-                url = `${host}/code/${id}/${name}/`;
-            } else {
-                url = `${host}/code/${id}/`;
-            }
-            fetch(url, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "text/plain",
-                },
-                body: value,
-                mode: 'no-cors',
-            });
+            websocket!.send(`CODE: ${value}`);
         }
 
         const interval = setInterval(postCode, 2000);
@@ -52,12 +66,33 @@
         });
     }
 
+    function onNameChanged() {
+        if (!/^[a-zA-Z0-9]+$/.test(username)) {
+            username = oldUsername;
+            return;
+        }
+
+        oldUsername = username;
+        websocket!.send(`NAME: ${username}`);
+    }
 </script>
 
 <label for=name>Name:</label>
-<input id=name bind:value={name} on:change={() => lastValue = ""}>
+<input id=name bind:value={username} on:change={onNameChanged}>
 <hr>
 <CodeMirror bind:value basic={false} extensions={[keymap.of([
     ...defaultKeymap,
   ])
 ]}/>
+<hr>
+{#if showing_host_code}
+    <button on:click={() => {showing_host_code = false}}>Hide host code</button>
+    <br>
+    {#if host_code == ""}
+        <i>No code yet from host</i>
+    {:else}
+        <code>{host_code}</code>
+    {/if}
+{:else}
+    <button on:click={() => {showing_host_code = true}}>Show host code</button>
+{/if}

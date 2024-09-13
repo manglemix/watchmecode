@@ -5,88 +5,88 @@
 )]
 use chrono::{Local, Timelike};
 use parking_lot::RwLock;
-use std::{collections::HashMap, sync::Arc};
+use tower::ServiceBuilder;
+use notify::{event::{DataChange, ModifyKind}, Event, EventKind, Watcher};
+use std::{io::{BufReader, Read, SeekFrom}, sync::atomic::{AtomicUsize, Ordering}};
 
-use axum::{extract::Path, routing::post, Router};
-use fxhash::{FxBuildHasher, FxHashMap};
+use axum::{extract::{ws::Message, WebSocketUpgrade}, response::Response, routing::get, Router};
 
 use tokio::{
-    fs::{create_dir_all, read_dir, remove_file},
-    io::{AsyncWriteExt, BufWriter},
+    fs::{create_dir_all, read_dir, remove_file, File},
+    io::{AsyncSeekExt, AsyncWriteExt, BufWriter}, sync::Notify,
 };
-use tower_http::compression::CompressionLayer;
+use tower_http::{compression::CompressionLayer, cors::{Any, CorsLayer}};
 
-struct UserInfo {
-    name: Arc<str>,
-}
+static HOST_CODE: RwLock<String> = RwLock::new(String::new());
+static HOST_CODE_CHANGED: Notify = Notify::const_new();
 
-static USERS: RwLock<FxHashMap<String, UserInfo>> =
-    RwLock::new(HashMap::with_hasher(FxBuildHasher::new()));
-
-async fn post_code(id: String, name: Option<String>, code: String) {
-    let owned_name: Arc<str>;
-    let name = if let Some(name) = name {
-        'result: {
-            if let Some(info) = USERS.read().get(&id) {
-                if &*info.name == &name {
-                    owned_name = info.name.clone();
-                    break 'result &*owned_name;
+async fn code_ws(ws: WebSocketUpgrade) -> Response {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    ws.on_upgrade(|mut ws| async move {
+        let mut name = COUNTER.fetch_add(1, Ordering::Relaxed).to_string();
+        let mut filename = format!("incoming/{name}.txt");
+        let mut file = BufWriter::new(File::create(&filename).await.expect("Failed to create file"));
+        
+        {
+            let host_code = HOST_CODE.read().clone();
+            ws.send(Message::Text(host_code)).await.expect("Failed to send message");
+        }
+        
+        loop {
+            tokio::select! {
+                option = ws.recv() => {
+                    if let Some(Ok(msg)) = option {
+                        let Message::Text(msg) = msg else { continue; };
+                        if msg.len() <= 6 {
+                            continue;
+                        }
+                        
+                        match &msg[0..6] {
+                            "CODE: " => {
+                                let code = &msg.as_bytes()[6..];
+                                let datetime = Local::now();
+                                let timestamp = format!(
+                                    "{:0>2}:{:0>2}:{:0>2}",
+                                    datetime.hour(),
+                                    datetime.minute(),
+                                    datetime.second(),
+                                );
+                                let result: std::io::Result<()> = try {
+                                    const DIVIDER: &[u8] = b"\n-------------------\n";
+                                    let len = timestamp.len() + DIVIDER.len() + code.len();
+                                    file.seek(SeekFrom::Start(0)).await.expect("Failed to seek to start");
+                                    file.get_mut().set_len(len as u64).await.expect("Failed to set length of file");
+                                    file.write_all(timestamp.as_bytes()).await?;
+                                    file.write_all(DIVIDER).await?;
+                                    file.write_all(code).await?;
+                                };
+                                result.expect("Failed to write to file");
+                                file.flush().await.expect("Failed to flush");
+                            }
+                            "NAME: " => {
+                                drop(file);
+                                let old_filename = filename;
+                                name = msg;
+                                name.drain(0..6);
+                                filename = format!("incoming/{name}.txt");
+                                file = BufWriter::new(File::create(&filename).await.expect("Failed to create file"));
+                                tokio::io::copy(&mut File::open(&old_filename).await.expect("Failed to open file for copying"), &mut file).await.expect("Failed to copy file");
+                                file.flush().await.expect("Failed to flush file");
+                                remove_file(&old_filename).await.expect("Failed to delete file");
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                _ = HOST_CODE_CHANGED.notified() => {
+                    let host_code = HOST_CODE.read().clone();
+                    ws.send(Message::Text(host_code)).await.expect("Failed to send message");
                 }
             }
-            let mut writer = USERS.write();
-            owned_name = Arc::from(name.into_boxed_str());
-            writer.insert(
-                id.to_owned(),
-                UserInfo {
-                    name: owned_name.clone(),
-                },
-            );
-            &*owned_name
         }
-    } else {
-        if let Some(info) = USERS.read().get(&id) {
-            owned_name = info.name.clone();
-            &*owned_name
-        } else {
-            ""
-        }
-    };
-
-    let mut file = BufWriter::new(
-        tokio::fs::File::create(format!("incoming/{id}.txt"))
-            .await
-            .expect("Failed to open file"),
-    );
-
-    let result: std::io::Result<()> = try {
-        if !name.is_empty() {
-            file.write_all(b"Name: ").await?;
-            file.write_all(name.as_bytes()).await?;
-            file.write_all(b" | ").await?;
-        }
-        let datetime = Local::now();
-        let timestamp = format!(
-            "{:0>2}:{:0>2}:{:0>2}",
-            datetime.hour(),
-            datetime.minute(),
-            datetime.second(),
-        );
-        file.write_all(timestamp.as_bytes()).await?;
-        file.write_all(b"\n-------------------\n").await?;
-        file.write_all(code.as_bytes()).await?;
-    };
-    result.expect("Failed to write to file");
-    file.flush().await.expect("Failed to flush");
-}
-
-#[axum::debug_handler]
-async fn post_code_with_name(Path((id, name)): Path<(String, String)>, code: String) {
-    post_code(id, Some(name), code).await
-}
-
-#[axum::debug_handler]
-async fn post_code_without_name(Path((id,)): Path<(String,)>, code: String) {
-    post_code(id, None, code).await
+    })
 }
 
 #[tokio::main]
@@ -97,11 +97,39 @@ async fn main() {
     while let Some(entry) = read_dir_iter.next_entry().await.unwrap() {
         tokio::spawn(remove_file(entry.path()));
     }
+    
+    std::fs::File::create("host_code.txt").expect("Failed to create host_code.txt");
+    
+    let mut watcher = notify::recommended_watcher(|res: notify::Result<Event>| {
+        match res.expect("Failed to observe change in host_code.txt").kind {
+            EventKind::Modify(ModifyKind::Data(DataChange::Content)) => {
+                let mut host_code_file = BufReader::new(std::fs::File::open("host_code.txt").expect("Failed to open host_code.txt"));
+                {
+                    let mut writer = HOST_CODE.write();
+                    writer.clear();
+                    if host_code_file.read_to_string(&mut *writer).is_err() {
+                        return;
+                    }
+                }
+                HOST_CODE_CHANGED.notify_waiters();
+            }
+            _ => {}
+        }
+    }).expect("Failed to set up filesystem watcher");
+
+    watcher.watch("host_code.txt".as_ref(), notify::RecursiveMode::Recursive).expect("Failed to watch host_code.txt");
 
     let app = Router::new()
-        .route("/code/:id/:name/", post(post_code_with_name))
-        .route("/code/:id/", post(post_code_without_name))
-        .layer(CompressionLayer::new().br(true));
+        .route("/code/", get(code_ws))
+        .layer(
+            ServiceBuilder::new()
+                .layer(CompressionLayer::new().br(true))
+                .layer(
+                    CorsLayer::new()
+                        .allow_origin(Any)
+                        .allow_methods(Any)
+                )
+        );
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:80").await.unwrap();
     axum::serve(listener, app).await.unwrap();
