@@ -4,38 +4,34 @@
     import { keymap } from "@codemirror/view";
 	import { onDestroy } from "svelte";
 	import { browser } from "$app/environment";
-
-    function generateRandomString(length: number) {
-        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let result = '';
-        const charactersLength = characters.length;
-        for (let i = 0; i < length; i++) {
-            result += characters.charAt(Math.floor(Math.random() * charactersLength));
-        }
-        return result;
-    }
     
     let value = "";
-    let id = generateRandomString(12);
+    let name = "";
+    let lastValue = "";
 
     if (browser) {
-        let lastValue = "";
 
         const urlParams = new URLSearchParams(window.location.search);
-        const host = urlParams.get('host') ?? "127.0.0.1";
+        const host = urlParams.get('host') ?? "http://127.0.0.1";
 
         async function postCode() {
             if (lastValue == value) {
                 return;
             }
             lastValue = value;
-            fetch(`${host}/code/${id}`, {
+            let url;
+            if (name.length > 0) {
+                url = `${host}/code/${name}/`;
+            } else {
+                url = `${host}/code/`;
+            }
+            fetch(url, {
                 method: "POST",
                 headers: {
                     "Content-Type": "text/plain",
                 },
                 body: value,
-                mode: "no-cors",
+                credentials: 'include'
             });
         }
 
@@ -49,7 +45,7 @@
 </script>
 
 <label for=name>Name:</label>
-<input id=name bind:value={id}>
+<input id=name bind:value={name} on:change={() => lastValue = ""}>
 <hr>
 <CodeMirror bind:value basic={false} extensions={[keymap.of([
     ...defaultKeymap,
