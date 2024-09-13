@@ -31,6 +31,7 @@
                     "Content-Type": "text/plain",
                 },
                 body: value,
+                mode: 'no-cors',
                 credentials: 'include'
             });
         }
