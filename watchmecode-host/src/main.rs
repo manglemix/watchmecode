@@ -84,8 +84,9 @@ async fn code_ws(ws: WebSocketUpgrade) -> Response {
                                 name = msg;
                                 name.drain(0..6);
                                 filename = format!("incoming/{name}.txt");
-                                file = BufWriter::new(File::create(&filename).await.expect("Failed to create file"));
-                                tokio::io::copy(&mut File::open(&old_filename).await.expect("Failed to open file for copying"), &mut file).await.expect("Failed to copy file");
+                                let mut tmp_file = File::create(&filename).await.expect("Failed to create file");
+                                tokio::io::copy(&mut File::open(&old_filename).await.expect("Failed to open file for copying"), &mut tmp_file).await.expect("Failed to copy file");
+                                file = BufWriter::new(tmp_file);
                                 file.flush().await.expect("Failed to flush file");
                                 remove_file(&old_filename).await.expect("Failed to delete file");
                             }

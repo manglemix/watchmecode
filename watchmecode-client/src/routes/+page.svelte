@@ -16,6 +16,7 @@
     let host_code = "";
     let showing_host_code = false;
     let websocket: WebSocket | null = null;
+    let lastUpdate = 0;
 
     if (browser) {
         const urlParams = new URLSearchParams(window.location.search);
@@ -27,6 +28,7 @@
             websocket = new WebSocket(`${host}/code/`);
             websocket.onmessage = (event) => {
                 host_code = event.data;
+                lastUpdate = 0;
             };
             websocket.onclose = (_) => {
                 if (websocket === null) {
@@ -60,9 +62,13 @@
         }
 
         const interval = setInterval(postCode, 2000);
+        const interval2 = setInterval(() => {
+            lastUpdate++;
+        }, 1000);
 
         onDestroy(() => {
             clearInterval(interval);
+            clearInterval(interval2);
         });
     }
 
@@ -92,6 +98,7 @@
 {#if showing_host_code}
     <button on:click={() => {showing_host_code = false}}>Hide host code</button>
     <br>
+    <p>Last updated: {lastUpdate} seconds ago</p>
     {#if host_code == ""}
         <i>No code yet from host</i>
     {:else}
