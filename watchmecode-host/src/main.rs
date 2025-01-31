@@ -152,6 +152,7 @@ async fn main() {
         Some(Commands::Ngrok) => {
             let mut tun = ngrok::Session::builder()
                 // Read the token from the NGROK_AUTHTOKEN environment variable
+                // Get your authtoken here https://dashboard.ngrok.com/get-started/your-authtoken
                 .authtoken_from_env()
                 // Connect the ngrok session
                 .connect()
