@@ -102,7 +102,7 @@
     {#if host_code == ""}
         <i>No code yet from host</i>
     {:else}
-        <code>{host_code}</code>
+        <pre>{host_code}</pre>
     {/if}
 {:else}
     <button on:click={() => {showing_host_code = true}}>Show host code</button>
